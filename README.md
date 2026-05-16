@@ -1,84 +1,98 @@
 # openclaw-mimo-patch
 
-Fix Xiaomi MiMo API `400 Param Incorrect` error when using tool calling with reasoning mode in [OpenClaw](https://github.com/openclaw/openclaw).
+修复 OpenClaw 使用小米 MiMo 推理模型时，tool calling 第二轮请求报 **400 Param Incorrect** 的问题。
 
-## Problem
+## 问题描述
 
-When using Xiaomi MiMo reasoning models (mimo-v2.5-pro, mimo-v2-pro, etc.) as the default model in OpenClaw, **tool calling fails on the second round** with:
+当 OpenClaw 使用 MiMo 推理模型（mimo-v2.5-pro、mimo-v2-pro 等）作为默认模型时，**tool calling 第二轮请求失败**：
 
 ```
 provider rejected the request schema or tool payload
 400 Param Incorrect
 ```
 
-**Root cause:** MiMo is a reasoning model (like DeepSeek-R1). When it responds with tool calls, the response includes a `reasoning_content` field. On the next request, MiMo's API **requires** this field to be present in the assistant message (even as an empty string `""`). OpenClaw's `convertMessages` function doesn't include `reasoning_content` for Xiaomi models, causing the API to reject the request.
+**根因**：MiMo 是推理模型（类似 DeepSeek-R1）。首次请求返回的响应中包含 `reasoning_content` 字段。OpenClaw 执行完工具后发起第二轮请求时，没有把 `reasoning_content` 传回去，而 MiMo API 要求 thinking mode 下 assistant message 必须携带此字段（哪怕为空字符串 `""`），因此 API 返回 400。
 
 ```
-Request 1 (OK):  OpenClaw → MiMo → tool_calls + reasoning_content
-                  OpenClaw executes tool
-Request 2 (400): OpenClaw → MiMo (missing reasoning_content) → ❌ rejected
+请求1（正常）: OpenClaw → MiMo → tool_calls + reasoning_content
+               OpenClaw 执行工具
+请求2（失败）: OpenClaw → MiMo（缺少 reasoning_content）→ ❌ 400
 ```
 
-## Usage
+## 一键修复
+
+**Windows（PowerShell）**：
+```powershell
+irm https://raw.githubusercontent.com/mikeyoubeach/openclaw-mimo-patch/master/patch.py | python
+openclaw gateway restart
+```
+
+**macOS / Linux（Bash）**：
+```bash
+curl -sL https://raw.githubusercontent.com/mikeyoubeach/openclaw-mimo-patch/master/patch.py | python3
+openclaw gateway restart
+```
+
+## 手动使用
 
 ```bash
-# Apply patch
-python patch.py
+git clone https://github.com/mikeyoubeach/openclaw-mimo-patch.git
+cd openclaw-mimo-patch
 
-# Check status (no changes)
-python patch.py --check
-
-# Revert to original
-python patch.py --revert
+python patch.py            # 打补丁
+python patch.py --check    # 检查状态（不修改文件）
+python patch.py --revert   # 恢复原状
 ```
 
-After patching, restart OpenClaw:
+打完补丁后重启 OpenClaw：
 ```bash
 openclaw gateway restart
 ```
 
-## When to Re-apply
+## 何时需要重新打补丁
 
-After any of these events:
+以下操作会覆盖补丁，需要重新执行：
 - `npm update openclaw`
 - `npm install openclaw@latest`
-- OpenClaw version change
+- OpenClaw 版本号变更
 
-## Requirements
+## 环境要求
 
 - Python 3.6+
-- OpenClaw installed via npm
+- OpenClaw 通过 npm 安装
 
-## Technical Details
+## 技术细节
 
-**File patched:**
+**修改的文件**：
 ```
-<npm-global-prefix>/node_modules/openclaw/node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js
+<npm全局路径>/node_modules/openclaw/node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js
 ```
 
-**Change:** In the `convertMessages` function (~line 700), the condition:
+**修改内容**：在 `convertMessages` 函数（约第 700 行）中，原来的条件：
 ```js
 if (compat.requiresReasoningContentOnAssistantMessages && model.reasoning && ...)
 ```
 
-is expanded to also trigger for `model.provider === "xiaomi"`:
+扩展为同时覆盖 `model.provider === "xiaomi"`：
 ```js
-const needsReasoningContent = compat.requiresReasoningContentOnAssistantMessages ||
+const needsReasoningContent =
+    compat.requiresReasoningContentOnAssistantMessages ||
     (model.reasoning && model.provider === "xiaomi");
+if (needsReasoningContent && model.reasoning && ...)
 ```
 
-This matches how DeepSeek models are already handled in the same codebase.
+这与代码库中 DeepSeek 模型的处理方式一致。
 
-## Tested Models
+## 已测试模型
 
-| Model | Status |
-|-------|--------|
-| mimo-v2.5-pro | ✅ Fixed |
-| mimo-v2.5 | ✅ Fixed |
-| mimo-v2-pro | ✅ Fixed |
-| mimo-v2-omni | ✅ Fixed |
-| mimo-v2-flash | N/A (reasoning=false) |
+| 模型 | 状态 |
+|------|------|
+| mimo-v2.5-pro | ✅ 已修复 |
+| mimo-v2.5 | ✅ 已修复 |
+| mimo-v2-pro | ✅ 已修复 |
+| mimo-v2-omni | ✅ 已修复 |
+| mimo-v2-flash | 无需（reasoning=false） |
 
-## License
+## 许可证
 
 MIT
